@@ -274,13 +274,18 @@ func (this *DbCoordinater) IsDone(ctx context.Context) bool {
 	return v
 }
 
+func (this *DbCoordinater) getAllIds() []string {
+	allIds := make([]string, 0)
+	allIds = append(allIds, this.Id)
+	allIds = append(allIds, this.Partners...)
+	return allIds
+}
+
 func (this *DbCoordinater) CheckDone() (bool, error) {
 	done := false
 
 	// 伙伴节点的任务全部都完成
-	allIds := make([]string, 0)
-	allIds = append(allIds, this.Id)
-	allIds = append(allIds, this.Partners...)
+	allIds := this.getAllIds()
 
 	cis := make([]*CoordinateInfo, 0)
 	err := this.Db.Model(&CoordinateInfo{}).
@@ -307,9 +312,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	// TODO
 	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
 	//	可以根据业务情况优化
-	allIds := make([]string, 0)
-	allIds = append(allIds, this.Id)
-	allIds = append(allIds, this.Partners...)
+	allIds := this.getAllIds()
 
 	numList := make([][]int, 0)
 	idxMap := make(map[int]*CmdInfo)
@@ -374,9 +377,7 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 	defer tk.Stop()
 
 	loopCnt := 0
-	allIds := make([]string, 0)
-	allIds = append(allIds, this.Id)
-	allIds = append(allIds, this.Partners...)
+	allIds := this.getAllIds()
 
 	for {
 		loopCnt++
