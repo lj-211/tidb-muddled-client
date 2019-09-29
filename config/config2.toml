@@ -7,4 +7,4 @@ dsn = "root:@tcp(127.0.0.1:4000)/client_test?charset=utf8mb4&parseTime=true"
 idle = 10
 open = 10
 [sql]
-fpath = "./config/sql.file"
+fpath = "./config/sql2.file"
