@@ -21,6 +21,34 @@ Usage of ./tidb-muddled-client:
 ./tidb-muddled-client -c ./config/config2.toml -id 2 -p 1 -b 9982
 ```
 
+### 代码结构
+```
+├── README.md
+├── common                          公共库
+│   ├── errors.go
+│   ├── permutation.go
+│   └── permutation_test.go
+├── config                          配置目录
+│   ├── config.toml
+│   ├── config2.toml
+│   ├── sql.file
+│   └── sql2.file
+├── coordinate                      任务协调器
+│   ├── coordinate.go
+│   └── db_coordinate.go            基于db的任务协调器
+├── doc                             文档
+│   └── sql.md
+├── global.go
+├── go.mod
+├── go.sum
+├── init.go
+├── loader                          输入加载模块
+│   ├── file_loader.go
+│   └── loader.go
+├── main.go
+├── sql_cmd.go                      client的sql处理逻辑
+├── sql_load.go                     client的sql加载逻辑
+```
 ### demo编码思路
 在没有任务调度的前提下，通过数据做状态同步和任务调度，是实现的主要思路。
 
