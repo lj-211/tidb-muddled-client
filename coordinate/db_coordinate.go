@@ -3,6 +3,7 @@ package coordinate
 import (
 	"context"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/jinzhu/gorm"
@@ -313,6 +314,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
 	//	可以根据业务情况优化
 	allIds := this.getAllIds()
+	sort.Strings(allIds)
 
 	numList := make([][]int, 0)
 	idxMap := make(map[int]*CmdInfo)
@@ -335,10 +337,19 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 
 	orders := common.FullPermutationNew(numList)
 
-	log.Println("全排列: ", orders)
-
 	trans := func(db *gorm.DB) error {
 		var err error
+
+		// double check
+		ci := &CoordinateInfo{}
+		err = db.Model(ci).Set("query_option", "for update").
+			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[0]).Find(ci).Error
+		if err != nil {
+			return errors.Wrap(err, "double check status fail")
+		}
+		if ci.Status != CiStatus_InitOk {
+			return nil
+		}
 
 	OUT_LOOP:
 		for _, v := range orders {
@@ -397,18 +408,18 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 				break
 			}
 
-			if loopCnt == 1 {
-				allOk := true
-				for i := 0; i < len(cis); i++ {
-					v := cis[i]
-					if v.Status != CiStatus_InitOk {
-						allOk = false
-						break
-					}
-				}
-				if !allOk {
+			// 1. 检查是否是全InitOk状态，是的话尝试去初始化任务序列表
+			// 2. 因为1里面做了double check，所以可能已经初始化完成，跳出进行下一次判断，期待进入allCom的逻辑
+
+			allOk := true
+			for i := 0; i < len(cis); i++ {
+				v := cis[i]
+				if v.Status != CiStatus_InitOk {
+					allOk = false
 					break
 				}
+			}
+			if allOk {
 				err = this.genTaskOrder(ctx)
 				if err != nil {
 					loopCnt = 0
@@ -416,21 +427,22 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 					break
 				}
 				log.Println("初始化任务次序成功")
-			} else if loopCnt > 1 {
-				allCom := true
-				for i := 0; i < len(cis); i++ {
-					v := cis[i]
-					if v.Status != CiStatus_Completed {
-						allCom = false
-						break
-					}
+				break
+			}
+
+			allCom := true
+			for i := 0; i < len(cis); i++ {
+				v := cis[i]
+				if v.Status != CiStatus_Completed {
+					allCom = false
+					break
 				}
-				if allCom {
-					log.Println("初始化成功")
-					this.InitOk <- true
-					time.Sleep(time.Second * 10)
-					return
-				}
+			}
+			if allCom {
+				log.Println("初始化成功")
+				this.InitOk <- true
+				time.Sleep(time.Second * 10)
+				return
 			}
 		}
 	}
