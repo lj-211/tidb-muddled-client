@@ -242,6 +242,8 @@ func (this *DbCoordinater) DoTask(ctx context.Context) error {
 			return errors.Wrap(err, "查询任务失败")
 		}
 		sql := ci.Sql
+		// TODO
+		// 这里可能存在数据不一致的问题，待优化
 		err = this.Proc(sql)
 		if err != nil {
 			return errors.Wrap(err, "执行任务失败")
