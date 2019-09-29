@@ -15,8 +15,9 @@ import (
 func argParse() {
 	flag.StringVar(&CfgPath, "c", "", "配置文件文件路径")
 	partners := ""
-	flag.StringVar(&partners, "p", "", "伙伴id(1,2,3)")
+	flag.StringVar(&partners, "p", "", "伙伴id,exp: 1,2,3")
 	flag.StringVar(&BatchId, "b", "", "同一批次客户端的批次id")
+	flag.StringVar(&Id, "id", "", "节点id")
 
 	flag.Parse()
 
@@ -65,6 +66,11 @@ func boot() error {
 }
 
 func StartWork() {
+	err := loadData()
+	if err != nil {
+		log.Println("ERROR: 加载数据失败 ", err.Error())
+		return
+	}
 	TaskCoordinater.Start(context.Background(), worker.SqlWorker)
 
 	for {

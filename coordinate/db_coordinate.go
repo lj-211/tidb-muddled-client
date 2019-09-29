@@ -28,7 +28,7 @@ const (
 )
 
 type CoordinateInfo struct {
-	gorm.Model
+	ID          uint   `gorm:"primary_key"`
 	BatchId     string // 批次id
 	NodeId      string // 节点id
 	TaskCnt     int    // 任务数量
@@ -41,7 +41,7 @@ func (e *CoordinateInfo) TableName() string {
 }
 
 type CmdInfo struct {
-	gorm.Model
+	ID      uint   `gorm:"primary_key"`
 	BatchId string // 批次id
 	NodeId  string // 命令所属的节点id
 	Sql     string // 命令
@@ -52,7 +52,7 @@ func (e *CmdInfo) TableName() string {
 }
 
 type CmdOrder struct {
-	gorm.Model
+	ID      uint   `gorm:"primary_key"`
 	BatchId string // 批次id
 	CmdId   uint   // 命令id
 	NodeId  string // 节点id
@@ -290,7 +290,7 @@ func (this *DbCoordinater) CheckDone() (bool, error) {
 
 	cis := make([]*CoordinateInfo, 0)
 	err := this.Db.Model(&CoordinateInfo{}).
-		Where("batch_id = ? and node_id in ?", this.BatchId, allIds).Find(&cis).Error
+		Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).Find(&cis).Error
 	if err != nil {
 		return done, errors.Wrap(err, "查询是否完成失败")
 	}
@@ -374,7 +374,7 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 			allIds = append(allIds, this.Partners...)
 			cis := make([]*CoordinateInfo, 0)
 			err := this.Db.Model(&CoordinateInfo{}).
-				Where("batch_id = ? and node_id in ?", this.BatchId, allIds).Find(&cis).Error
+				Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).Find(&cis).Error
 			if err != nil {
 				break
 			}
