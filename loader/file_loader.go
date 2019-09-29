@@ -30,10 +30,11 @@ func (this *FileSqlLoader) Load(path interface{}, prc StmtProcess) error {
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil || err == io.EOF {
+			prc("", true)
 			break
 		}
 
-		prc(line)
+		prc(line, false)
 	}
 
 	return nil

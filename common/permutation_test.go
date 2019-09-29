@@ -57,3 +57,17 @@ func Test_FullPermutation(t *testing.T) {
 
 	assert.Equal(t, true, equal(ret, cret), "返回值为空slice")
 }
+
+func Test_FullPermutationNew(t *testing.T) {
+	in := [][]int{
+		[]int{1, 2},
+		[]int{3},
+	}
+	cret := [][]int{
+		[]int{1, 2, 3},
+		[]int{1, 3, 2},
+		[]int{3, 1, 2},
+	}
+	ret := FullPermutationNew(in)
+	assert.Equal(t, true, equal(ret, cret), "返回值检查必须深度相等")
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/BurntSushi/toml"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/lj-211/tidb-muddled-client/coordinate"
 	"github.com/lj-211/tidb-muddled-client/loader"
-	"github.com/lj-211/tidb-muddled-client/worker"
 )
 
 func checkGlobal() error {
@@ -68,7 +68,11 @@ func initCoordinater() error {
 		return errors.Wrap(err, "初始化协调器失败")
 	}
 
+	db.LogMode(false)
+
 	TaskCoordinater = dbc
+
+	TaskCoordinater.Start(context.Background(), SqlWorker)
 
 	return nil
 }
@@ -79,7 +83,7 @@ func initLoader() error {
 }
 
 func loadData() error {
-	err := SqlLoader.Load(Config.Sql.Fpath, worker.PushSqlToCoordinate)
+	err := SqlLoader.Load(Config.Sql.Fpath, PushSqlToCoordinate)
 	if err != nil {
 		return errors.Wrap(err, "加载sql失败")
 	}

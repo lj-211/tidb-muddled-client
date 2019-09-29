@@ -173,11 +173,13 @@ func (this *DbCoordinater) PushTask(ctx context.Context, data interface{}, done 
 	switch {
 	case done == true:
 		// set ci status to InitOk
+		//this.Db.LogMode(true)
 		err := this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id = ?", cdata.BatchId, this.Id).
 			Update("status", CiStatus_InitOk).Error
 		if err != nil {
 			return errors.Wrap(err, "设置初始化完成失败")
 		}
+		log.Println("节点", this.Id, "加载完毕", cdata.BatchId, this.Id)
 	case done == false:
 		trans := func(db *gorm.DB) error {
 			// add task
@@ -198,22 +200,26 @@ func (this *DbCoordinater) PushTask(ctx context.Context, data interface{}, done 
 		if err := cdb.DoTrans(this.Db, trans); err != nil {
 			return err
 		}
+		log.Println("push sql: ", cdata.Sql)
 	}
 
 	return nil
 }
 
 func (this *DbCoordinater) Watch(ctx context.Context) error {
+WAIT_OK_LOOP:
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-this.InitOk:
-			break
+			break WAIT_OK_LOOP
 		}
 	}
 
-	tk := time.NewTicker(time.Second)
+	log.Println("开始消费任务")
+
+	tk := time.NewTicker(time.Millisecond * 50)
 	defer tk.Stop()
 	// start watch task
 	for {
@@ -222,8 +228,8 @@ func (this *DbCoordinater) Watch(ctx context.Context) error {
 			return nil
 		case <-tk.C:
 			err := this.DoTask(ctx)
-			if err != nil {
-				log.Println("ERROR: 执行任务失败")
+			if err != nil && !gorm.IsRecordNotFoundError(errors.Cause(err)) {
+				log.Println("ERROR: 执行任务失败 ", err.Error())
 			}
 		}
 	}
@@ -233,7 +239,7 @@ func (this *DbCoordinater) Watch(ctx context.Context) error {
 
 func (this *DbCoordinater) DoTask(ctx context.Context) error {
 	co := &CmdOrder{}
-	err := this.Db.Model(co).Where("batch_id = ? and is_done = 0").
+	err := this.Db.Model(co).Where("batch_id = ? and is_done = 0", this.BatchId).
 		Order("id asc").Limit(1).Find(co).Error
 	if err != nil {
 		return errors.Wrap(err, "query task fail")
@@ -296,18 +302,13 @@ func (this *DbCoordinater) CheckDone() (bool, error) {
 	}
 	allTask := 0
 	doneTask := 0
-	allInitOk := true
 	for i := 0; i < len(cis); i++ {
 		v := cis[i]
-		if v.Status != CiStatus_InitOk {
-			allInitOk = false
-			break
-		}
 		allTask += v.TaskCnt
 		doneTask += v.DoneTaskCnt
 	}
 
-	if allInitOk && allTask == doneTask {
+	if allTask == doneTask {
 		done = true
 	}
 
@@ -318,17 +319,32 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	// TODO
 	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
 	//	可以根据业务情况优化
-	cmds := make([]*CmdInfo, 0)
-	err := this.Db.Model(&CmdInfo{}).Where("batch_id = ?", this.BatchId).Find(&cmds).Error
-	if err != nil {
-		return errors.Wrap(err, "查询任务列表失败")
+	allIds := make([]string, 0)
+	allIds = append(allIds, this.Id)
+	allIds = append(allIds, this.Partners...)
+
+	numList := make([][]int, 0)
+	idxMap := make(map[int]*CmdInfo)
+	for i := 0; i < len(allIds); i++ {
+		cmds := make([]*CmdInfo, 0)
+		err := this.Db.Model(&CmdInfo{}).Order("id asc").
+			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[i]).Find(&cmds).Error
+		if err != nil {
+			return errors.Wrap(err, "查询任务列表失败")
+		}
+
+		nums := make([]int, 0)
+		for _, v := range cmds {
+			nums = append(nums, int(v.ID))
+			idxMap[int(v.ID)] = v
+		}
+
+		numList = append(numList, nums)
 	}
 
-	nums := make([]int, len(cmds))
-	for i := 0; i < len(nums); i++ {
-		nums[i] = i
-	}
-	orders := common.FullPermutation(nums)
+	orders := common.FullPermutationNew(numList)
+
+	log.Println("全排列: ", orders)
 
 	trans := func(db *gorm.DB) error {
 		var err error
@@ -336,10 +352,11 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	OUT_LOOP:
 		for _, v := range orders {
 			for _, e := range v {
+				cmd, _ := idxMap[e]
 				co := &CmdOrder{
 					BatchId: this.BatchId,
-					CmdId:   cmds[e].ID,
-					NodeId:  cmds[e].NodeId,
+					CmdId:   cmd.ID,
+					NodeId:  cmd.NodeId,
 				}
 
 				err = db.Model(co).Create(co).Error
@@ -348,6 +365,11 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 				}
 			}
 		}
+
+		err = this.Db.Model(&CoordinateInfo{}).Where("batch_id = ?", this.BatchId).
+			Update(map[string]interface{}{
+				"status":   CiStatus_Completed,
+				"task_cnt": gorm.Expr("task_cnt * ?", len(orders))}).Error
 
 		return err
 	}
@@ -363,15 +385,18 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 	tk := time.NewTicker(time.Second * 2)
 	defer tk.Stop()
 
+	loopCnt := 0
+	allIds := make([]string, 0)
+	allIds = append(allIds, this.Id)
+	allIds = append(allIds, this.Partners...)
+
 	for {
+		loopCnt++
 		select {
 		case <-ctx.Done():
 			return
 		case <-tk.C:
-			// 1. do query if all node is OK
-			allIds := make([]string, 0)
-			allIds = append(allIds, this.Id)
-			allIds = append(allIds, this.Partners...)
+			// 1. do query if all node status
 			cis := make([]*CoordinateInfo, 0)
 			err := this.Db.Model(&CoordinateInfo{}).
 				Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).Find(&cis).Error
@@ -379,26 +404,45 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 				break
 			}
 
-			allOk := true
-			for i := 0; i < len(cis); i++ {
-				v := cis[i]
-				if v.Status != CiStatus_InitOk {
-					allOk = false
+			if len(cis) != len(allIds) {
+				break
+			}
+
+			if loopCnt == 1 {
+				allOk := true
+				for i := 0; i < len(cis); i++ {
+					v := cis[i]
+					if v.Status != CiStatus_InitOk {
+						allOk = false
+						break
+					}
+				}
+				if !allOk {
 					break
 				}
+				err = this.genTaskOrder(ctx)
+				if err != nil {
+					loopCnt = 0
+					log.Println("gen: ", err.Error())
+					break
+				}
+				log.Println("初始化任务次序成功")
+			} else if loopCnt > 1 {
+				allCom := true
+				for i := 0; i < len(cis); i++ {
+					v := cis[i]
+					if v.Status != CiStatus_Completed {
+						allCom = false
+						break
+					}
+				}
+				if allCom {
+					log.Println("初始化成功")
+					this.InitOk <- true
+					time.Sleep(time.Second * 10)
+					return
+				}
 			}
-			if !allOk {
-				break
-			}
-
-			err = this.genTaskOrder(ctx)
-			if err != nil {
-				break
-			}
-
-			this.InitOk <- true
-
-			return
 		}
 	}
 }

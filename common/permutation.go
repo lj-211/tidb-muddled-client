@@ -34,3 +34,52 @@ func FullPermutation(in []int) [][]int {
 
 	return ret
 }
+
+func backtrackingNew(numList [][]int, mask []int, depth int, arr []int, output *[][]int) {
+	if output == nil {
+		return
+	}
+
+	if len(numList) != len(mask) {
+		return
+	}
+
+	if depth == len(arr) {
+		newArr := make([]int, len(arr))
+		copy(newArr, arr)
+		*output = append(*output, newArr)
+		return
+	}
+
+	for i := 0; i < len(numList); i++ {
+		v := numList[i]
+		cursor := mask[i]
+		if cursor < len(v) {
+			mask[i]++
+			arr[depth] = v[cursor]
+			backtrackingNew(numList, mask, depth+1, arr, output)
+			mask[i]--
+		}
+	}
+}
+
+func FullPermutationNew(numList [][]int) [][]int {
+	size := len(numList)
+	if size == 0 {
+		return [][]int{}
+	}
+
+	allSize := 0
+	for i := 0; i < size; i++ {
+		v := numList[i]
+		allSize += len(v)
+	}
+
+	cursorList := make([]int, size)
+	output := make([][]int, 0)
+	arr := make([]int, allSize)
+
+	backtrackingNew(numList, cursorList, 0, arr, &output)
+
+	return output
+}

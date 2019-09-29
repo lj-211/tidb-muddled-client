@@ -1,11 +1,17 @@
-package worker
+package main
 
 import (
-	//"github.com/pkg/errors"
-	"log"
+	"context"
+	//"log"
+
+	"github.com/lj-211/tidb-muddled-client/coordinate"
 )
 
-func PushSqlToCoordinate(sql string) error {
-	log.Print("sql语句: ", sql)
-	return nil
+func PushSqlToCoordinate(sql string, isLast bool) error {
+	ci := coordinate.CmdInfo{
+		BatchId: BatchId,
+		NodeId:  Id,
+		Sql:     sql,
+	}
+	return TaskCoordinater.PushTask(context.TODO(), ci, isLast)
 }

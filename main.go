@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-
-	"github.com/lj-211/tidb-muddled-client/worker"
 )
 
 func argParse() {
@@ -71,11 +69,11 @@ func StartWork() {
 		log.Println("ERROR: 加载数据失败 ", err.Error())
 		return
 	}
-	TaskCoordinater.Start(context.Background(), worker.SqlWorker)
 
 	for {
 		done := TaskCoordinater.IsDone(context.TODO())
 		if done {
+			log.Println("任务完成")
 			break
 		}
 	}
