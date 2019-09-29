@@ -12,19 +12,12 @@ import (
 	"github.com/lj-211/tidb-muddled-client/common"
 )
 
-const TtlTime time.Duration = time.Second * 5
-const ExpireTime time.Duration = TtlTime * 2
-
 // -------------------------------------------------------------------------
 // model
-// 初始化过程
-//	1. insert ignore into
-//	2. 如果存在，则检查是否存活，如果存活则异常退出
-//	3. 如果插入成功，则开始保活
 const (
-	CiStatus_Regist = iota
-	CiStatus_InitOk
-	CiStatus_Completed
+	CiStatus_Regist    = iota // 批次节点刚注册
+	CiStatus_InitOk           // 批次节点初始化成功(已压入任务完成)
+	CiStatus_Completed        // 任务可以启动的状态
 )
 
 type CoordinateInfo struct {
@@ -116,13 +109,6 @@ func (this *DbCoordinater) DoStart(bid string, partners []string) error {
 			return errors.Wrap(err, "launch coordinate fail")
 		}
 
-		/*
-			cnt := 0
-			err := this.Db.Model(ci).Where("node_id in ?", partners).Count(&cnt).Error
-			if err != nil {
-				return errors.Wrap(err, "查询是否启动完成错误")
-			}
-		*/
 		return nil
 	}
 	if err := cdb.DoTrans(this.Db, trans); err != nil {
@@ -256,7 +242,7 @@ func (this *DbCoordinater) DoTask(ctx context.Context) error {
 			return errors.Wrap(err, "查询任务失败")
 		}
 		sql := ci.Sql
-		err = this.Proc(db, sql)
+		err = this.Proc(sql)
 		if err != nil {
 			return errors.Wrap(err, "执行任务失败")
 		}
