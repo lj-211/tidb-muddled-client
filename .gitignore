@@ -1,0 +1,6 @@
+# vim
+*.swp
+*.swo
+
+# bin
+tidb-muddled-client
