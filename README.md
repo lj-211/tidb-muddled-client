@@ -24,6 +24,9 @@ Usage of ./tidb-muddled-client:
 ### 代码结构
 ```
 ├── README.md
+├── algorithm                       工程算法实现
+│   ├── permutation.go
+│   └── permutation_test.go
 ├── common                          公共库
 │   ├── errors.go
 │   ├── permutation.go
