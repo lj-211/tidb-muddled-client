@@ -167,7 +167,7 @@ WAIT_OK_LOOP:
 
 	log.Println("开始消费任务")
 
-	tk := time.NewTicker(time.Millisecond * 50)
+	tk := time.NewTicker(time.Millisecond * 10)
 	defer tk.Stop()
 	// start watch task
 	for {
@@ -322,7 +322,6 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 			if allCom {
 				log.Println("初始化成功")
 				this.InitOk <- true
-				time.Sleep(time.Second * 10)
 				return
 			}
 		}

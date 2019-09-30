@@ -26,6 +26,10 @@ func checkGlobal() error {
 		return errors.New("没有批次id,无法进行任务协调")
 	}
 
+	if Id == "" {
+		return errors.New("必须制定client标识")
+	}
+
 	return nil
 }
 
@@ -72,7 +76,11 @@ func initCoordinater() error {
 
 	TaskCoordinater = dbc
 
-	TaskCoordinater.Start(context.Background(), SqlWorker)
+	err = TaskCoordinater.Start(context.Background(), SqlWorker)
+	if err != nil {
+		log.Println("调度失败: ", err.Error())
+		return errors.Wrap(err, "启动调度失败")
+	}
 
 	return nil
 }
