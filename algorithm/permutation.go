@@ -1,4 +1,4 @@
-package common
+package algorithm
 
 func backtracking(nums []int, arr []int, depth int, mask map[int]bool, output *[][]int) {
 	size := len(nums)
@@ -35,7 +35,7 @@ func FullPermutation(in []int) [][]int {
 	return ret
 }
 
-func backtrackingNew(numList [][]int, mask []int, depth int, arr []int, output *[][]int) {
+func backtrackingList(numList [][]int, mask []int, depth int, arr []int, output *[][]int) {
 	if output == nil {
 		return
 	}
@@ -57,13 +57,13 @@ func backtrackingNew(numList [][]int, mask []int, depth int, arr []int, output *
 		if cursor < len(v) {
 			mask[i]++
 			arr[depth] = v[cursor]
-			backtrackingNew(numList, mask, depth+1, arr, output)
+			backtrackingList(numList, mask, depth+1, arr, output)
 			mask[i]--
 		}
 	}
 }
 
-func FullPermutationNew(numList [][]int) [][]int {
+func FullListPermutation(numList [][]int) [][]int {
 	size := len(numList)
 	if size == 0 {
 		return [][]int{}
@@ -79,7 +79,7 @@ func FullPermutationNew(numList [][]int) [][]int {
 	output := make([][]int, 0)
 	arr := make([]int, allSize)
 
-	backtrackingNew(numList, cursorList, 0, arr, &output)
+	backtrackingList(numList, cursorList, 0, arr, &output)
 
 	return output
 }

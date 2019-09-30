@@ -1,4 +1,13 @@
 # db
+## 批次锁
+```
+CREATE TABLE `client_test`.`batch_lock` (
+  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `batch_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '批次id',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_batch_id` (`batch_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci AUTO_INCREMENT=7208 COMMENT='批次锁';
+```
 ## 批次节点信息表
 ```
 CREATE TABLE `client_test`.`coordinate_info` (

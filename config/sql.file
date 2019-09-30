@@ -1,2 +1,2 @@
-1 : select * from test limit 1;
-1 : select * from test where test_id = 1234;
+select * from test limit 11;
+select * from test where test_id = 12;

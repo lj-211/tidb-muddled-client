@@ -2,6 +2,7 @@ package coordinate
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sort"
 	"time"
@@ -10,6 +11,7 @@ import (
 	cdb "github.com/lj-211/common/db"
 	"github.com/pkg/errors"
 
+	"github.com/lj-211/tidb-muddled-client/algorithm"
 	"github.com/lj-211/tidb-muddled-client/common"
 )
 
@@ -20,6 +22,15 @@ const (
 	CiStatus_InitOk           // 批次节点初始化成功(已压入任务完成)
 	CiStatus_Completed        // 任务可以启动的状态
 )
+
+type BatchLock struct {
+	ID      uint `gorm:"primary_key"`
+	BatchId string
+}
+
+func (e *BatchLock) TableName() string {
+	return "batch_lock"
+}
 
 type CoordinateInfo struct {
 	ID          uint   `gorm:"primary_key"`
@@ -59,6 +70,10 @@ func (e *CmdOrder) TableName() string {
 
 // -------------------------------------------------------------------------
 // coordinater
+// NOTE:
+//	1. db协调依赖于mysql,不可在tidb中实现,因为初始化任务序列依赖于锁抢占
+//		而tidb是在提交时，才检测锁冲突
+//	2. 因为脚本可能会被调度，所以调度本身不考虑设计任务超时退出的逻辑
 type DbCoordinater struct {
 	Db       *gorm.DB
 	Id       string
@@ -71,6 +86,7 @@ type DbCoordinater struct {
 	Proc     TaskProcesser
 }
 
+// 创建Db协调者
 func NewDbCoordinate(id, bid string, partners []string, db *gorm.DB) (*DbCoordinater, error) {
 	if db == nil {
 		return nil, common.NilInputErr
@@ -87,68 +103,13 @@ func NewDbCoordinate(id, bid string, partners []string, db *gorm.DB) (*DbCoordin
 	}, nil
 }
 
+// 启动协调器
 func (this *DbCoordinater) Start(ctx context.Context, proc TaskProcesser) error {
 	this.Proc = proc
-	return this.DoStart(this.BatchId, this.Partners)
+	return this.doStart(this.BatchId, this.Partners)
 }
 
-func (this *DbCoordinater) DoStart(bid string, partners []string) error {
-	this.Ctx, this.Cancel = context.WithCancel(context.Background())
-	this.Done = make(chan bool)
-	this.InitOk = make(chan bool)
-
-	trans := func(db *gorm.DB) error {
-		ci := &CoordinateInfo{
-			BatchId:     bid,
-			NodeId:      this.Id,
-			TaskCnt:     0,
-			DoneTaskCnt: 0,
-			Status:      CiStatus_Regist,
-		}
-		err := this.Db.Model(ci).Create(ci).Error
-		if err != nil {
-			return errors.Wrap(err, "launch coordinate fail")
-		}
-
-		return nil
-	}
-	if err := cdb.DoTrans(this.Db, trans); err != nil {
-		return err
-	}
-
-	// check task all push ok then start watcher
-	wioCtx, _ := context.WithCancel(this.Ctx)
-	go this.WatchInitOk(wioCtx)
-	// task watcher
-	wtCtx, _ := context.WithCancel(this.Ctx)
-	go this.Watch(wtCtx)
-	// watch done
-	go func() {
-		tk := time.NewTicker(time.Second)
-		defer tk.Stop()
-
-		for {
-			select {
-			case <-tk.C:
-				done, err := this.CheckDone()
-				if err != nil {
-					log.Println("ERROR: 检查完成状态失败: ", err.Error())
-				} else {
-					if done {
-						this.Cancel()
-						this.Done <- true
-						return
-					}
-				}
-			}
-		}
-	}()
-
-	return nil
-}
-
-// NOTE
-//	这里有个特殊逻辑，如果done == true的话，只处理推送任务完成逻辑，忽略data
+// 向Db协调器注册任务
 func (this *DbCoordinater) PushTask(ctx context.Context, data interface{}, done bool) error {
 	if data == nil {
 		return common.NilInputErr
@@ -160,7 +121,6 @@ func (this *DbCoordinater) PushTask(ctx context.Context, data interface{}, done 
 	switch {
 	case done == true:
 		// set ci status to InitOk
-		//this.Db.LogMode(true)
 		err := this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id = ?", cdata.BatchId, this.Id).
 			Update("status", CiStatus_InitOk).Error
 		if err != nil {
@@ -193,6 +153,7 @@ func (this *DbCoordinater) PushTask(ctx context.Context, data interface{}, done 
 	return nil
 }
 
+// 监听协调器接收调度并且执行任务
 func (this *DbCoordinater) Watch(ctx context.Context) error {
 WAIT_OK_LOOP:
 	for {
@@ -224,6 +185,7 @@ WAIT_OK_LOOP:
 	return nil
 }
 
+// 执行任务逻辑
 func (this *DbCoordinater) DoTask(ctx context.Context) error {
 	co := &CmdOrder{}
 	err := this.Db.Model(co).Where("batch_id = ? and is_done = 0", this.BatchId).
@@ -270,18 +232,13 @@ func (this *DbCoordinater) DoTask(ctx context.Context) error {
 	return nil
 }
 
+// 阻塞获取完成状态
 func (this *DbCoordinater) IsDone(ctx context.Context) bool {
 	v := <-this.Done
 	return v
 }
 
-func (this *DbCoordinater) getAllIds() []string {
-	allIds := make([]string, 0)
-	allIds = append(allIds, this.Id)
-	allIds = append(allIds, this.Partners...)
-	return allIds
-}
-
+// 检查所有任务是否完成的状态
 func (this *DbCoordinater) CheckDone() (bool, error) {
 	done := false
 
@@ -309,89 +266,14 @@ func (this *DbCoordinater) CheckDone() (bool, error) {
 	return done, nil
 }
 
-func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
-	// TODO
-	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
-	//	可以根据业务情况优化
-	allIds := this.getAllIds()
-	sort.Strings(allIds)
-
-	numList := make([][]int, 0)
-	idxMap := make(map[int]*CmdInfo)
-	for i := 0; i < len(allIds); i++ {
-		cmds := make([]*CmdInfo, 0)
-		err := this.Db.Model(&CmdInfo{}).Order("id asc").
-			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[i]).Find(&cmds).Error
-		if err != nil {
-			return errors.Wrap(err, "查询任务列表失败")
-		}
-
-		nums := make([]int, 0)
-		for _, v := range cmds {
-			nums = append(nums, int(v.ID))
-			idxMap[int(v.ID)] = v
-		}
-
-		numList = append(numList, nums)
-	}
-
-	orders := common.FullPermutationNew(numList)
-
-	trans := func(db *gorm.DB) error {
-		var err error
-
-		// double check
-		ci := &CoordinateInfo{}
-		err = db.Model(ci).Set("query_option", "for update").
-			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[0]).Find(ci).Error
-		if err != nil {
-			return errors.Wrap(err, "double check status fail")
-		}
-		if ci.Status != CiStatus_InitOk {
-			return nil
-		}
-
-	OUT_LOOP:
-		for _, v := range orders {
-			for _, e := range v {
-				cmd, _ := idxMap[e]
-				co := &CmdOrder{
-					BatchId: this.BatchId,
-					CmdId:   cmd.ID,
-					NodeId:  cmd.NodeId,
-				}
-
-				err = db.Model(co).Create(co).Error
-				if err != nil {
-					break OUT_LOOP
-				}
-			}
-		}
-
-		err = this.Db.Model(&CoordinateInfo{}).Where("batch_id = ?", this.BatchId).
-			Update(map[string]interface{}{
-				"status":   CiStatus_Completed,
-				"task_cnt": gorm.Expr("task_cnt * ?", len(orders))}).Error
-
-		return err
-	}
-
-	if err := cdb.DoTrans(this.Db, trans); err != nil {
-		return errors.Wrap(err, "执行生成任务失败")
-	}
-
-	return nil
-}
-
+// 等待初始化完成
 func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 	tk := time.NewTicker(time.Second * 2)
 	defer tk.Stop()
 
-	loopCnt := 0
 	allIds := this.getAllIds()
 
 	for {
-		loopCnt++
 		select {
 		case <-ctx.Done():
 			return
@@ -422,11 +304,10 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 			if allOk {
 				err = this.genTaskOrder(ctx)
 				if err != nil {
-					loopCnt = 0
 					log.Println("gen: ", err.Error())
-					break
+				} else {
+					log.Println("初始化任务次序成功")
 				}
-				log.Println("初始化任务次序成功")
 				break
 			}
 
@@ -446,4 +327,161 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// 批次锁，用于多个client抢占执行初始化任务序列
+func (this *DbCoordinater) lockBatch(db *gorm.DB, bid string) error {
+	bi := &BatchLock{}
+	return db.Set("gorm:query_option", "FOR UPDATE").Model(bi).
+		Where("batch_id = ?", bid).Find(bi).Error
+}
+
+// 生成全排列任务序列
+func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
+	// TODO
+	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
+	//	可以根据业务情况优化
+	allIds := this.getAllIds()
+	sort.Strings(allIds)
+
+	numList := make([][]int, 0)
+	idxMap := make(map[int]*CmdInfo)
+	for i := 0; i < len(allIds); i++ {
+		cmds := make([]*CmdInfo, 0)
+		err := this.Db.Model(&CmdInfo{}).Order("id asc").
+			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[i]).Find(&cmds).Error
+		if err != nil {
+			return errors.Wrap(err, "查询任务列表失败")
+		}
+
+		nums := make([]int, 0)
+		for _, v := range cmds {
+			nums = append(nums, int(v.ID))
+			idxMap[int(v.ID)] = v
+		}
+
+		numList = append(numList, nums)
+	}
+
+	orders := algorithm.FullListPermutation(numList)
+
+	trans := func(db *gorm.DB) error {
+		var err error
+
+		err = this.lockBatch(db, this.BatchId)
+		if err != nil {
+			return errors.Wrap(err, "lock fail")
+		}
+
+		// double check
+		ci := &CoordinateInfo{}
+		err = db.Model(ci).
+			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[0]).Find(ci).Error
+		if err != nil {
+			return errors.Wrap(err, "double check status fail")
+		}
+		if ci.Status != CiStatus_InitOk {
+			log.Println("状态异常，放弃生成序列数据")
+			return nil
+		}
+
+	OUT_LOOP:
+		for _, v := range orders {
+			for _, e := range v {
+				cmd, _ := idxMap[e]
+				co := &CmdOrder{
+					BatchId: this.BatchId,
+					CmdId:   cmd.ID,
+					NodeId:  cmd.NodeId,
+				}
+
+				err = db.Model(co).Create(co).Error
+				if err != nil {
+					break OUT_LOOP
+				}
+			}
+		}
+
+		err = this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).
+			Update(map[string]interface{}{
+				"status":   CiStatus_Completed,
+				"task_cnt": gorm.Expr("task_cnt * ?", len(orders))}).Error
+
+		return err
+	}
+
+	if err := cdb.DoTrans(this.Db, trans); err != nil {
+		return errors.Wrap(err, "执行生成任务失败")
+	}
+
+	return nil
+}
+
+// db协调启动逻辑
+func (this *DbCoordinater) doStart(bid string, partners []string) error {
+	this.Ctx, this.Cancel = context.WithCancel(context.Background())
+	this.Done = make(chan bool)
+	this.InitOk = make(chan bool)
+
+	trans := func(db *gorm.DB) error {
+		ci := &CoordinateInfo{
+			BatchId:     bid,
+			NodeId:      this.Id,
+			TaskCnt:     0,
+			DoneTaskCnt: 0,
+			Status:      CiStatus_Regist,
+		}
+		err := this.Db.Model(ci).Create(ci).Error
+		if err != nil {
+			return errors.Wrap(err, "launch coordinate fail")
+		}
+
+		err = this.Db.Exec(fmt.Sprintf("insert ignore into batch_lock (batch_id) values (%s)", bid)).Error
+		if err != nil {
+			return errors.Wrap(err, "create batch lock fail")
+		}
+
+		return nil
+	}
+	if err := cdb.DoTrans(this.Db, trans); err != nil {
+		return err
+	}
+
+	// check task all push ok then start watcher
+	wioCtx, _ := context.WithCancel(this.Ctx)
+	go this.WatchInitOk(wioCtx)
+	// task watcher
+	wtCtx, _ := context.WithCancel(this.Ctx)
+	go this.Watch(wtCtx)
+	// watch done
+	go func() {
+		tk := time.NewTicker(time.Second)
+		defer tk.Stop()
+
+		for {
+			select {
+			case <-tk.C:
+				done, err := this.CheckDone()
+				if err != nil {
+					log.Println("ERROR: 检查完成状态失败: ", err.Error())
+				} else {
+					if done {
+						this.Cancel()
+						this.Done <- true
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+// 内部用函数获取批次所有节点名称
+func (this *DbCoordinater) getAllIds() []string {
+	allIds := make([]string, 0)
+	allIds = append(allIds, this.Id)
+	allIds = append(allIds, this.Partners...)
+	return allIds
 }

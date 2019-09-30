@@ -13,7 +13,10 @@ type TaskProcesser func(string) error
 type Coordinater interface {
 	// 启动协调器
 	Start(context.Context, TaskProcesser) error
-	// 压入任务
+	// 注册任务
+	// NOTE
+	//	注册完成时，需要调用PushTask(ctx, nil, true)
+	//	如果done == true的话，只处理推送任务完成逻辑，忽略data
 	PushTask(context.Context, interface{}, bool) error
 	// 循环监听任务调度
 	Watch(context.Context) error

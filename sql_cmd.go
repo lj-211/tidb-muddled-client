@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	//"log"
 
 	"github.com/pkg/errors"
 
@@ -13,7 +13,7 @@ func SqlWorker(sql string) error {
 		return common.ParamInvalidErr
 	}
 
-	log.Println("exec: ", sql)
+	//log.Println("exec: ", sql)
 	err := Db.Exec(sql).Error
 	if err != nil {
 		return errors.Wrap(err, "执行任务sql失败")
