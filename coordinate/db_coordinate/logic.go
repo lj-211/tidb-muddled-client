@@ -357,22 +357,27 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 			return nil
 		}
 
+		size := 0
 		for v := range out {
-			cmd, _ := idxMap[v]
-			co := &CmdOrder{
-				BatchId: this.BatchId,
-				CmdId:   cmd.ID,
-				NodeId:  cmd.NodeId,
-			}
+			size++
+			for i := 0; i < len(v); i++ {
+				e := v[i]
+				cmd, _ := idxMap[e]
+				co := &CmdOrder{
+					BatchId: this.BatchId,
+					CmdId:   cmd.ID,
+					NodeId:  cmd.NodeId,
+				}
 
-			err = db.Model(co).Create(co).Error
-			if err != nil {
-				break
+				err = db.Model(co).Create(co).Error
+				if err != nil {
+					break
+				}
 			}
 		}
 
 		if err != nil {
-			for _ = range v {
+			for _ = range out {
 			}
 			return err
 		}
@@ -380,7 +385,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 		err = this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).
 			Update(map[string]interface{}{
 				"status":   CiStatus_Completed,
-				"task_cnt": gorm.Expr("task_cnt * ?", len(orders))}).Error
+				"task_cnt": gorm.Expr("task_cnt * ?", size)}).Error
 
 		return err
 	}
