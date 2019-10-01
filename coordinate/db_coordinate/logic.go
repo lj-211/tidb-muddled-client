@@ -334,7 +334,8 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 		numList = append(numList, nums)
 	}
 
-	orders := algorithm.FullListPermutation(numList)
+	out := make(chan []int)
+	go algorithm.FullListPermutationChan(numList, out)
 
 	trans := func(db *gorm.DB) error {
 		var err error
@@ -356,21 +357,24 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 			return nil
 		}
 
-	OUT_LOOP:
-		for _, v := range orders {
-			for _, e := range v {
-				cmd, _ := idxMap[e]
-				co := &CmdOrder{
-					BatchId: this.BatchId,
-					CmdId:   cmd.ID,
-					NodeId:  cmd.NodeId,
-				}
-
-				err = db.Model(co).Create(co).Error
-				if err != nil {
-					break OUT_LOOP
-				}
+		for v := range out {
+			cmd, _ := idxMap[v]
+			co := &CmdOrder{
+				BatchId: this.BatchId,
+				CmdId:   cmd.ID,
+				NodeId:  cmd.NodeId,
 			}
+
+			err = db.Model(co).Create(co).Error
+			if err != nil {
+				break
+			}
+		}
+
+		if err != nil {
+			for _ = range v {
+			}
+			return err
 		}
 
 		err = this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).
