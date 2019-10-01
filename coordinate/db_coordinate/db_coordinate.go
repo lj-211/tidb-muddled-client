@@ -1,4 +1,4 @@
-package coordinate
+package db_coordinate
 
 import (
 	"context"
@@ -13,61 +13,8 @@ import (
 
 	"github.com/lj-211/tidb-muddled-client/algorithm"
 	"github.com/lj-211/tidb-muddled-client/common"
+	"github.com/lj-211/tidb-muddled-client/coordinate"
 )
-
-// -------------------------------------------------------------------------
-// model
-const (
-	CiStatus_Regist    = iota // 批次节点刚注册
-	CiStatus_InitOk           // 批次节点初始化成功(已压入任务完成)
-	CiStatus_Completed        // 任务可以启动的状态
-)
-
-type BatchLock struct {
-	ID      uint `gorm:"primary_key"`
-	BatchId string
-}
-
-func (e *BatchLock) TableName() string {
-	return "batch_lock"
-}
-
-type CoordinateInfo struct {
-	ID          uint   `gorm:"primary_key"`
-	BatchId     string // 批次id
-	NodeId      string // 节点id
-	TaskCnt     int    // 任务数量
-	DoneTaskCnt int    // 已执行任务数量
-	Status      int    // 状态
-	Ttl         int64  // 心跳时间
-}
-
-func (e *CoordinateInfo) TableName() string {
-	return "coordinate_info"
-}
-
-type CmdInfo struct {
-	ID      uint   `gorm:"primary_key"`
-	BatchId string // 批次id
-	NodeId  string // 命令所属的节点id
-	Sql     string // 命令
-}
-
-func (e *CmdInfo) TableName() string {
-	return "cmd_info"
-}
-
-type CmdOrder struct {
-	ID      uint   `gorm:"primary_key"`
-	BatchId string // 批次id
-	CmdId   uint   // 命令id
-	NodeId  string // 节点id
-	IsDone  int    // 是否完成
-}
-
-func (e *CmdOrder) TableName() string {
-	return "cmd_order"
-}
 
 const ttlTimeDuration time.Duration = time.Second * 10
 const nodeExpireTime int64 = 60 // 单位秒
@@ -85,9 +32,9 @@ type DbCoordinater struct {
 	Partners []string
 	Ctx      context.Context
 	Cancel   context.CancelFunc
-	Done     chan TaskRst
+	Done     chan coordinate.TaskRst
 	InitOk   chan bool
-	Proc     TaskProcesser
+	Proc     coordinate.TaskProcesser
 }
 
 // 创建Db协调者
@@ -108,20 +55,19 @@ func NewDbCoordinate(id, bid string, partners []string, db *gorm.DB) (*DbCoordin
 }
 
 // 启动协调器
-func (this *DbCoordinater) Start(ctx context.Context, proc TaskProcesser) error {
+func (this *DbCoordinater) Start(ctx context.Context, proc coordinate.TaskProcesser) error {
 	this.Proc = proc
 	return this.doStart(this.BatchId, this.Partners)
 }
 
 // 向Db协调器注册任务
-func (this *DbCoordinater) PushTask(ctx context.Context, data interface{}, done bool) error {
-	if data == nil {
-		return common.NilInputErr
+func (this *DbCoordinater) PushTask(ctx context.Context, info coordinate.TaskInfo, done bool) error {
+	cdata := CmdInfo{
+		BatchId: info.BatchId,
+		NodeId:  info.Id,
+		Sql:     info.Sql,
 	}
-	cdata, ok := data.(CmdInfo)
-	if !ok {
-		return errors.New("推送数据异常")
-	}
+
 	switch {
 	case done == true:
 		// set ci status to InitOk
@@ -239,14 +185,14 @@ func (this *DbCoordinater) DoTask(ctx context.Context) error {
 }
 
 // 阻塞获取完成状态
-func (this *DbCoordinater) BlockCheckDone(ctx context.Context) TaskRst {
+func (this *DbCoordinater) BlockCheckDone(ctx context.Context) coordinate.TaskRst {
 	rt := <-this.Done
 	return rt
 }
 
 // 检查所有任务是否完成的状态
-func (this *DbCoordinater) checkDone() (TaskRst, error) {
-	doneState := DoneState_Unknown
+func (this *DbCoordinater) checkDone() (coordinate.TaskRst, error) {
+	doneState := coordinate.DoneState_Unknown
 	msg := ""
 
 	// 伙伴节点的任务全部都完成
@@ -256,7 +202,7 @@ func (this *DbCoordinater) checkDone() (TaskRst, error) {
 	err := this.Db.Model(&CoordinateInfo{}).
 		Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).Find(&cis).Error
 	if err != nil {
-		return TaskRst{}, errors.Wrap(err, "查询是否完成失败")
+		return coordinate.TaskRst{}, errors.Wrap(err, "查询是否完成失败")
 	}
 	allTask := 0
 	doneTask := 0
@@ -273,21 +219,21 @@ func (this *DbCoordinater) checkDone() (TaskRst, error) {
 
 	switch {
 	case allTask == doneTask:
-		doneState = DoneState_OK
+		doneState = coordinate.DoneState_OK
 	case allTask < doneTask:
 		if !allAlive {
-			doneState = DoneState_OverTime
+			doneState = coordinate.DoneState_OverTime
 			msg = "任务节点已超时, 任务退出"
 		} else {
-			doneState = DoneState_Doing
+			doneState = coordinate.DoneState_Doing
 			msg = fmt.Sprintf("任务进度: %d / %d", doneTask, allTask)
 		}
 	default:
-		doneState = DoneState_Unknown
+		doneState = coordinate.DoneState_Unknown
 		msg = "任务异常，请检查任务列表"
 	}
 
-	return TaskRst{
+	return coordinate.TaskRst{
 		DoneState: doneState,
 		Msg:       msg,
 	}, nil
@@ -445,7 +391,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 // db协调启动逻辑
 func (this *DbCoordinater) doStart(bid string, partners []string) error {
 	this.Ctx, this.Cancel = context.WithCancel(context.Background())
-	this.Done = make(chan TaskRst)
+	this.Done = make(chan coordinate.TaskRst)
 	this.InitOk = make(chan bool)
 
 	trans := func(db *gorm.DB) error {
@@ -511,12 +457,12 @@ OUT_LOOP:
 			} else {
 				st := ds.DoneState
 				switch {
-				case st == DoneState_OK || st == DoneState_OverTime || st == DoneState_ErrOccur:
+				case st == coordinate.DoneState_OK || st == coordinate.DoneState_OverTime || st == coordinate.DoneState_ErrOccur:
 					this.Cancel()
 					this.Done <- ds
 					break OUT_LOOP
 				default:
-					log.Println("任务状态: ", DoneStateToStr(ds.DoneState), ds.Msg)
+					log.Println("任务状态: ", coordinate.DoneStateToStr(ds.DoneState), ds.Msg)
 				}
 			}
 		}

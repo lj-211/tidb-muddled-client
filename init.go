@@ -9,7 +9,7 @@ import (
 	"github.com/jinzhu/gorm"
 	"github.com/pkg/errors"
 
-	"github.com/lj-211/tidb-muddled-client/coordinate"
+	"github.com/lj-211/tidb-muddled-client/coordinate/db_coordinate"
 	"github.com/lj-211/tidb-muddled-client/loader"
 )
 
@@ -67,7 +67,7 @@ func initCoordinater() error {
 	db.DB().SetMaxIdleConns(Config.Cdb.Idle)
 	db.DB().SetMaxOpenConns(Config.Cdb.Open)
 
-	dbc, err := coordinate.NewDbCoordinate(Id, BatchId, Partners, db)
+	dbc, err := db_coordinate.NewDbCoordinate(Id, BatchId, Partners, db)
 	if err != nil {
 		return errors.Wrap(err, "初始化协调器失败")
 	}

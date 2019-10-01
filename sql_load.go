@@ -8,9 +8,9 @@ import (
 )
 
 func PushSqlToCoordinate(sql string, isLast bool) error {
-	ci := coordinate.CmdInfo{
+	ci := coordinate.TaskInfo{
 		BatchId: BatchId,
-		NodeId:  Id,
+		Id:      Id,
 		Sql:     sql,
 	}
 	return TaskCoordinater.PushTask(context.TODO(), ci, isLast)
