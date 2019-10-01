@@ -39,7 +39,7 @@ type CoordinateInfo struct {
 	TaskCnt     int    // 任务数量
 	DoneTaskCnt int    // 已执行任务数量
 	Status      int    // 状态
-	Ttl         int    // 心跳时间
+	Ttl         int64  // 心跳时间
 }
 
 func (e *CoordinateInfo) TableName() string {
@@ -68,6 +68,9 @@ type CmdOrder struct {
 func (e *CmdOrder) TableName() string {
 	return "cmd_order"
 }
+
+const ttlTimeDuration time.Duration = time.Second * 10
+const nodeExpireTime int64 = 60 // 单位秒
 
 // -------------------------------------------------------------------------
 // coordinater
@@ -183,6 +186,8 @@ WAIT_OK_LOOP:
 		}
 	}
 
+	log.Println("INFO: 任务监听协程退出")
+
 	return nil
 }
 
@@ -255,23 +260,28 @@ func (this *DbCoordinater) checkDone() (TaskRst, error) {
 	}
 	allTask := 0
 	doneTask := 0
+	allAlive := true
+	now := time.Now().Unix()
 	for i := 0; i < len(cis); i++ {
 		v := cis[i]
 		allTask += v.TaskCnt
 		doneTask += v.DoneTaskCnt
+		if (now - v.Ttl) > nodeExpireTime {
+			allAlive = false
+		}
 	}
 
 	switch {
 	case allTask == doneTask:
 		doneState = DoneState_OK
 	case allTask < doneTask:
-		// TODO 检查是否有节点执行超时
-		if true {
+		if !allAlive {
 			doneState = DoneState_OverTime
-			msg = "任务节点已超时"
+			msg = "任务节点已超时, 任务退出"
+		} else {
+			doneState = DoneState_Doing
+			msg = fmt.Sprintf("任务进度: %d / %d", doneTask, allTask)
 		}
-		doneState = DoneState_Doing
-		msg = fmt.Sprintf("任务进度: %d / %d", doneTask, allTask)
 	default:
 		doneState = DoneState_Unknown
 		msg = "任务异常，请检查任务列表"
@@ -309,7 +319,6 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 
 			// 1. 检查是否是全InitOk状态，是的话尝试去初始化任务序列表
 			// 2. 因为1里面做了double check，所以可能已经初始化完成，跳出进行下一次判断，期待进入allCom的逻辑
-
 			allOk := true
 			for i := 0; i < len(cis); i++ {
 				v := cis[i]
@@ -472,6 +481,9 @@ func (this *DbCoordinater) doStart(bid string, partners []string) error {
 	// watch done
 	wdCtx, _ := context.WithCancel(this.Ctx)
 	go this.watchDone(wdCtx)
+	// ttl
+	ttlCtx, _ := context.WithCancel(this.Ctx)
+	go this.ttl(ttlCtx)
 
 	return nil
 }
@@ -509,4 +521,31 @@ OUT_LOOP:
 			}
 		}
 	}
+}
+
+// 节点保活
+func (this *DbCoordinater) ttl(ctx context.Context) {
+	// TODO 更新ci信息中的ttl字段
+	updateTtl := func(t time.Time) {
+		err := this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id = ?",
+			this.BatchId, this.Id).Update("ttl", t.Unix()).Error
+		if err != nil {
+			log.Println("ERROR: 心跳失败，稍后尝试下次心跳")
+		}
+	}
+
+	tk := time.NewTicker(ttlTimeDuration)
+	defer tk.Stop()
+
+OUT_LOOP:
+	for {
+		select {
+		case <-ctx.Done():
+			break OUT_LOOP
+		case t := <-tk.C:
+			updateTtl(t)
+		}
+	}
+
+	log.Println("INFO: 心跳退出")
 }
