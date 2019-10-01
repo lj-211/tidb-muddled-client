@@ -39,6 +39,7 @@ type CoordinateInfo struct {
 	TaskCnt     int    // 任务数量
 	DoneTaskCnt int    // 已执行任务数量
 	Status      int    // 状态
+	Ttl         int    // 心跳时间
 }
 
 func (e *CoordinateInfo) TableName() string {
@@ -81,7 +82,7 @@ type DbCoordinater struct {
 	Partners []string
 	Ctx      context.Context
 	Cancel   context.CancelFunc
-	Done     chan bool
+	Done     chan TaskRst
 	InitOk   chan bool
 	Proc     TaskProcesser
 }
@@ -233,14 +234,15 @@ func (this *DbCoordinater) DoTask(ctx context.Context) error {
 }
 
 // 阻塞获取完成状态
-func (this *DbCoordinater) IsDone(ctx context.Context) bool {
-	v := <-this.Done
-	return v
+func (this *DbCoordinater) BlockCheckDone(ctx context.Context) TaskRst {
+	rt := <-this.Done
+	return rt
 }
 
 // 检查所有任务是否完成的状态
-func (this *DbCoordinater) CheckDone() (bool, error) {
-	done := false
+func (this *DbCoordinater) checkDone() (TaskRst, error) {
+	doneState := DoneState_Unknown
+	msg := ""
 
 	// 伙伴节点的任务全部都完成
 	allIds := this.getAllIds()
@@ -249,7 +251,7 @@ func (this *DbCoordinater) CheckDone() (bool, error) {
 	err := this.Db.Model(&CoordinateInfo{}).
 		Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).Find(&cis).Error
 	if err != nil {
-		return done, errors.Wrap(err, "查询是否完成失败")
+		return TaskRst{}, errors.Wrap(err, "查询是否完成失败")
 	}
 	allTask := 0
 	doneTask := 0
@@ -259,11 +261,26 @@ func (this *DbCoordinater) CheckDone() (bool, error) {
 		doneTask += v.DoneTaskCnt
 	}
 
-	if allTask == doneTask {
-		done = true
+	switch {
+	case allTask == doneTask:
+		doneState = DoneState_OK
+	case allTask < doneTask:
+		// TODO 检查是否有节点执行超时
+		if true {
+			doneState = DoneState_OverTime
+			msg = "任务节点已超时"
+		}
+		doneState = DoneState_Doing
+		msg = fmt.Sprintf("任务进度: %d / %d", doneTask, allTask)
+	default:
+		doneState = DoneState_Unknown
+		msg = "任务异常，请检查任务列表"
 	}
 
-	return done, nil
+	return TaskRst{
+		DoneState: doneState,
+		Msg:       msg,
+	}, nil
 }
 
 // 等待初始化完成
@@ -419,7 +436,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 // db协调启动逻辑
 func (this *DbCoordinater) doStart(bid string, partners []string) error {
 	this.Ctx, this.Cancel = context.WithCancel(context.Background())
-	this.Done = make(chan bool)
+	this.Done = make(chan TaskRst)
 	this.InitOk = make(chan bool)
 
 	trans := func(db *gorm.DB) error {
@@ -453,26 +470,8 @@ func (this *DbCoordinater) doStart(bid string, partners []string) error {
 	wtCtx, _ := context.WithCancel(this.Ctx)
 	go this.Watch(wtCtx)
 	// watch done
-	go func() {
-		tk := time.NewTicker(time.Second)
-		defer tk.Stop()
-
-		for {
-			select {
-			case <-tk.C:
-				done, err := this.CheckDone()
-				if err != nil {
-					log.Println("ERROR: 检查完成状态失败: ", err.Error())
-				} else {
-					if done {
-						this.Cancel()
-						this.Done <- true
-						return
-					}
-				}
-			}
-		}
-	}()
+	wdCtx, _ := context.WithCancel(this.Ctx)
+	go this.watchDone(wdCtx)
 
 	return nil
 }
@@ -483,4 +482,31 @@ func (this *DbCoordinater) getAllIds() []string {
 	allIds = append(allIds, this.Id)
 	allIds = append(allIds, this.Partners...)
 	return allIds
+}
+
+// 实现检查任务是否完成的监听
+func (this *DbCoordinater) watchDone(ctx context.Context) {
+	tk := time.NewTicker(time.Second)
+	defer tk.Stop()
+
+OUT_LOOP:
+	for {
+		select {
+		case <-tk.C:
+			ds, err := this.checkDone()
+			if err != nil {
+				log.Println("ERROR: 检查完成状态失败: ", err.Error(), " 正在重新检查...")
+			} else {
+				st := ds.DoneState
+				switch {
+				case st == DoneState_OK || st == DoneState_OverTime || st == DoneState_ErrOccur:
+					this.Cancel()
+					this.Done <- ds
+					break OUT_LOOP
+				default:
+					log.Println("任务状态: ", DoneStateToStr(ds.DoneState), ds.Msg)
+				}
+			}
+		}
+	}
 }

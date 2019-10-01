@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+
+	"github.com/lj-211/tidb-muddled-client/coordinate"
 )
 
 func argParse() {
@@ -63,20 +65,16 @@ func boot() error {
 	return err
 }
 
-func StartWork() {
+func startWork() {
 	err := loadData()
 	if err != nil {
 		log.Println("ERROR: 加载数据失败 ", err.Error())
 		return
 	}
 
-	for {
-		done := TaskCoordinater.IsDone(context.TODO())
-		if done {
-			log.Println("任务完成")
-			break
-		}
-	}
+	done := TaskCoordinater.BlockCheckDone(context.TODO())
+	log.Println("任务结束状态: ", coordinate.DoneStateToStr(done.DoneState),
+		" 结束信息: ", done.Msg)
 
 	return
 }
@@ -88,7 +86,7 @@ func main() {
 		os.Exit(-1)
 	}
 
-	StartWork()
+	startWork()
 
 	return
 }

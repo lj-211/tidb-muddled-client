@@ -22,9 +22,9 @@ type SqlConfig struct {
 }
 
 type CliConfig struct {
-	Db  DbConfig
-	Cdb DbConfig
-	Sql SqlConfig
+	Db  DbConfig  // 测试实例db
+	Cdb DbConfig  // db coordinate 配置
+	Sql SqlConfig // sql statement输入配置
 }
 
 var Config CliConfig
@@ -40,4 +40,6 @@ var Partners []string = make([]string, 0)
 
 // 批次id
 var BatchId string = ""
+
+// client id
 var Id string = ""

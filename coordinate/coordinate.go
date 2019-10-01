@@ -4,12 +4,42 @@ import (
 	"context"
 )
 
+const (
+	DoneState_Unknown = iota
+	DoneState_Doing
+	DoneState_ErrOccur
+	DoneState_OverTime
+	DoneState_OK
+)
+
+func DoneStateToStr(st int) string {
+	switch {
+	case st == DoneState_Unknown:
+		return "未知"
+	case st == DoneState_OK:
+		return "已完成"
+	case st == DoneState_OverTime:
+		return "批次任务超时"
+	case st == DoneState_ErrOccur:
+		return "任务发生错误"
+	default:
+		return "非法的完成状态"
+	}
+
+	return ""
+}
+
+type TaskRst struct {
+	DoneState int
+	Msg       string
+}
+
 // 任务处理原型
 type TaskProcesser func(string) error
 
 // 任务协调器
 // init -> push task
-// watch -> get task -> run task -> commit task -> watch ....
+// watch -> get task -> do task -> commit task -> watch ....
 type Coordinater interface {
 	// 启动协调器
 	Start(context.Context, TaskProcesser) error
@@ -22,6 +52,6 @@ type Coordinater interface {
 	Watch(context.Context) error
 	// 执行任务
 	DoTask(context.Context) error
-	// 检查是否完成
-	IsDone(context.Context) bool
+	// 阻塞检查是否完成，
+	BlockCheckDone(context.Context) TaskRst
 }

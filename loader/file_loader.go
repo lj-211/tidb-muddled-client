@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/pkg/errors"
+
+	"github.com/lj-211/tidb-muddled-client/common"
 )
 
 // sql loader: load sql stmt from file
@@ -14,9 +16,12 @@ type FileSqlLoader struct {
 }
 
 func (this *FileSqlLoader) Load(path interface{}, prc StmtProcess) error {
+	if path == nil {
+		return common.NilInputErr
+	}
 	p, ok := path.(string)
 	if !ok {
-		return errors.New("文件sql加载器输入路径为非字符串")
+		return common.ParamInvalidErr
 	}
 
 	fd, err := os.Open(p)
@@ -27,6 +32,7 @@ func (this *FileSqlLoader) Load(path interface{}, prc StmtProcess) error {
 
 	reader := bufio.NewReader(fd)
 
+	// 这里输入保证是按行分割，所以不做更多容错处理
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil || err == io.EOF {
