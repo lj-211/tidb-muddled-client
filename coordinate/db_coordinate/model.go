@@ -43,9 +43,8 @@ func (e *CmdInfo) TableName() string {
 }
 
 type SimpleCmdInfo struct {
-	ID      uint   `gorm:"primary_key"`
-	BatchId string // 批次id
-	NodeId  string // 命令所属的节点id
+	ID     uint   `gorm:"primary_key"`
+	NodeId string // 命令所属的节点id
 }
 
 func (e *SimpleCmdInfo) TableName() string {

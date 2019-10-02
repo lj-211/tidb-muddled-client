@@ -307,30 +307,62 @@ func (this *DbCoordinater) lockBatch(db *gorm.DB, bid string) error {
 		Where("batch_id = ?", bid).Find(bi).Error
 }
 
+func (this *DbCoordinater) loadTask(ctx context.Context) ([][]*SimpleCmdInfo, error) {
+	allIds := this.getAllIds()
+	sort.Strings(allIds)
+
+	infoList := make([][]*SimpleCmdInfo, 0)
+
+	var err error = nil
+
+	const limit int = 20
+
+OUT_LOOP:
+	for i := 0; i < len(allIds); i++ {
+		var lastId uint = 0
+		infos := make([]*SimpleCmdInfo, 0)
+		for {
+			is := make([]*SimpleCmdInfo, 0)
+			err = this.Db.Model(&SimpleCmdInfo{}).Order("id asc").Limit(limit).
+				Where("id > ?", lastId).Find(&is).Error
+			if err != nil {
+				break OUT_LOOP
+			}
+			size := len(is)
+			if size > 0 {
+				infos = append(infos, is...)
+				lastId = is[size-1].ID
+			}
+			if size < limit {
+				break
+			}
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return infoList, nil
+}
+
 // 生成全排列任务序列
 func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	// TODO
 	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
 	//	可以根据业务情况优化
-	allIds := this.getAllIds()
-	sort.Strings(allIds)
-
-	numList := make([][]int, 0)
-	idxMap := make(map[int]*CmdInfo)
-	for i := 0; i < len(allIds); i++ {
-		cmds := make([]*CmdInfo, 0)
-		err := this.Db.Model(&CmdInfo{}).Order("id asc").
-			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[i]).Find(&cmds).Error
-		if err != nil {
-			return errors.Wrap(err, "查询任务列表失败")
+	taskList, err := this.loadTask()
+	if err != nil {
+		return errors.Wrap(err, "加载任务失败")
+	}
+	numList := make([][]uint, 0)
+	idxMap := make(map[uint]*SimpleCmdInfo)
+	for _, v := range taskList {
+		nums := make([]uint, 0)
+		for _, a := range v {
+			idxMap[a.ID] = a
+			nums = append(nums, a.ID)
 		}
-
-		nums := make([]int, 0)
-		for _, v := range cmds {
-			nums = append(nums, int(v.ID))
-			idxMap[int(v.ID)] = v
-		}
-
 		numList = append(numList, nums)
 	}
 

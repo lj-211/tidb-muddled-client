@@ -114,6 +114,10 @@ func backtrackingListChan(numList [][]int, mask []int, depth int, arr []int, out
 
 // output由外部创建，但是遵循生产者关闭的原则，在函数内部关闭
 func FullListPermutationChan(numList [][]int, output chan []int) {
+	if output == nil {
+		return
+	}
+
 	size := len(numList)
 	if size == 0 {
 		return
