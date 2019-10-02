@@ -23,7 +23,12 @@ const newCmdOrderTransCnt int = 100
 
 // 当前节点的任务sql索引
 // 这个数据在初始化时写，watch时读所以没有共享数据并发读写问题
-var CmdInfoMap map[uint]string = make(map[uint]string)
+type CmdExeInfo struct {
+	Sql      string
+	Executed bool
+}
+
+var CmdInfoMap map[uint]*CmdExeInfo = make(map[uint]*CmdExeInfo)
 
 // -------------------------------------------------------------------------
 // coordinater
@@ -92,7 +97,9 @@ func (this *DbCoordinater) PushTask(ctx context.Context, info coordinate.TaskInf
 				return errors.Wrap(err, "压入任务失败")
 			}
 
-			CmdInfoMap[cdata.ID] = cdata.Sql
+			CmdInfoMap[cdata.ID] = &CmdExeInfo{
+				Sql:      cdata.Sql,
+				Executed: false}
 
 			err = db.Model(&CoordinateInfo{}).
 				Where("batch_id = ? and node_id = ?", this.BatchId, this.Id).
@@ -163,19 +170,23 @@ func (this *DbCoordinater) doTask(ctx context.Context) error {
 
 	trans := func(db *gorm.DB) error {
 		// 如果没有找到，那是逻辑错误，必须强制退出任务
-		ciSql, ok := CmdInfoMap[co.CmdId]
+		cmdExeInfo, ok := CmdInfoMap[co.CmdId]
 		if ok {
 			return common.LogicErr
 		}
 
-		sql := ciSql
-		// TODO 这里可能存在数据不一致的问题，待优化
-		//	1. add donefile sync db
-		//	2. 从kafka消费tidb binlog 来验证任务是否完成
-		err = this.Proc(sql)
-		if err != nil {
-			return errors.Wrap(err, "执行任务失败")
+		sql := cmdExeInfo.Sql
+		// 这里增加了内存状态，即使tidb上指令已执行，任务事务未提交
+		// 非LogicErr，任务继续执行时，只是提交db任务状态更新，不会
+		// 导致指令在tidb上重复执行
+		if cmdExeInfo.Executed {
+			err = this.Proc(sql)
+			if err != nil {
+				return errors.Wrap(err, "执行任务失败")
+			}
+			CmdInfoMap[co.CmdId].Executed = true
 		}
+
 		err = db.Model(co).Where("id = ?", co.ID).Update("is_done", 1).Error
 		if err != nil {
 			return errors.Wrap(err, "提交任务失败")
