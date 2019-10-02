@@ -12,9 +12,6 @@ CREATE TABLE `client_test`.`batch_lock` (
 ```
 CREATE TABLE `client_test`.`coordinate_info` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '申请时间',
-  `updated_at` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '修改时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   `batch_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '批次id',
   `node_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '节点id',
   `task_cnt` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '任务数量',
@@ -30,9 +27,6 @@ CREATE TABLE `client_test`.`coordinate_info` (
 ```
 CREATE TABLE `client_test`.`cmd_info` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '申请时间',
-  `updated_at` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '修改时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   `batch_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '批次id',
   `node_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '节点id',
   `sql` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT 'sql语句',
@@ -45,9 +39,6 @@ CREATE TABLE `client_test`.`cmd_info` (
 ```
 CREATE TABLE `client_test`.`cmd_order` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '申请时间',
-  `updated_at` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '修改时间',
-  `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   `batch_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '批次id',
   `node_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '节点id',
   `cmd_id` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '任务id',
