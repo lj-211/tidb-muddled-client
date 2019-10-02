@@ -20,6 +20,10 @@ import (
 const ttlTimeDuration time.Duration = time.Second * 10
 const nodeExpireTime int64 = 60 // 单位秒
 
+// 当前节点的任务sql索引
+// 这个数据在初始化时写，watch时读所以没有共享数据并发读写问题
+var CmdInfoMap map[uint]string = make(map[uint]string)
+
 // -------------------------------------------------------------------------
 // coordinater
 // NOTE:
@@ -35,6 +39,7 @@ type DbCoordinater struct {
 	Cancel   context.CancelFunc
 	Done     chan coordinate.TaskRst
 	InitOk   chan bool
+	TaskOk   chan error
 	Proc     coordinate.TaskProcesser
 }
 
@@ -86,6 +91,8 @@ func (this *DbCoordinater) PushTask(ctx context.Context, info coordinate.TaskInf
 				return errors.Wrap(err, "压入任务失败")
 			}
 
+			CmdInfoMap[cdata.ID] = cdata.Sql
+
 			err = db.Model(&CoordinateInfo{}).
 				Where("batch_id = ? and node_id = ?", this.BatchId, this.Id).
 				Update("task_cnt", gorm.Expr("task_cnt + 1")).Error
@@ -129,6 +136,8 @@ WAIT_OK_LOOP:
 			err := this.doTask(ctx)
 			if err != nil && !gorm.IsRecordNotFoundError(errors.Cause(err)) {
 				log.Println("ERROR: 执行任务失败 ", err.Error())
+			} else if errors.Cause(err) == common.LogicErr {
+				this.TaskOk <- err
 			}
 		}
 	}
@@ -152,14 +161,21 @@ func (this *DbCoordinater) doTask(ctx context.Context) error {
 	}
 
 	trans := func(db *gorm.DB) error {
+		// TODO 优化为本地读取
 		ci := &CmdInfo{}
 		err := db.Model(ci).Where("id = ?", co.CmdId).Find(ci).Error
 		if err != nil {
 			return errors.Wrap(err, "查询任务失败")
 		}
-		sql := ci.Sql
-		// TODO
-		// 这里可能存在数据不一致的问题，待优化
+
+		ciSql, ok := CmdInfoMap[co.CmdId]
+		if ok {
+			return common.LogicErr
+		}
+
+		sql := ciSql
+		// TODO 这里可能存在数据不一致的问题，待优化
+		//	add donefile sync db
 		err = this.Proc(sql)
 		if err != nil {
 			return errors.Wrap(err, "执行任务失败")
@@ -179,7 +195,7 @@ func (this *DbCoordinater) doTask(ctx context.Context) error {
 	}
 
 	if err := cdb.DoTrans(this.Db, trans); err != nil {
-		return err
+		return errors.Wrap(err, "do task fail")
 	}
 
 	return nil
@@ -369,6 +385,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	out := make(chan []uint)
 	go algorithm.FullListPermutationChan(numList, out)
 
+	// TODO 大事务？
 	trans := func(db *gorm.DB) error {
 		var err error
 
@@ -435,6 +452,7 @@ func (this *DbCoordinater) doStart(bid string, partners []string) error {
 	this.Ctx, this.Cancel = context.WithCancel(context.Background())
 	this.Done = make(chan coordinate.TaskRst)
 	this.InitOk = make(chan bool)
+	this.TaskOk = make(chan error)
 
 	trans := func(db *gorm.DB) error {
 		ci := &CoordinateInfo{
@@ -489,9 +507,23 @@ func (this *DbCoordinater) watchDone(ctx context.Context) {
 	tk := time.NewTicker(time.Second)
 	defer tk.Stop()
 
+	exitClient := func(tr coordinate.TaskRst) {
+		this.Cancel()
+		this.Done <- tr
+	}
+
 OUT_LOOP:
 	for {
 		select {
+		case terr := <-this.TaskOk:
+			if terr != nil {
+				tr := coordinate.TaskRst{
+					DoneState: coordinate.DoneState_ErrOccur,
+					Msg:       terr.Error(),
+				}
+				exitClient(tr)
+				break OUT_LOOP
+			}
 		case <-tk.C:
 			ds, err := this.checkDone()
 			if err != nil {
@@ -500,8 +532,7 @@ OUT_LOOP:
 				st := ds.DoneState
 				switch {
 				case st == coordinate.DoneState_OK || st == coordinate.DoneState_OverTime || st == coordinate.DoneState_ErrOccur:
-					this.Cancel()
-					this.Done <- ds
+					exitClient(ds)
 					break OUT_LOOP
 				default:
 					log.Println("任务状态: ", coordinate.DoneStateToStr(ds.DoneState), ds.Msg)
