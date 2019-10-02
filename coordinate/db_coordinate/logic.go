@@ -126,7 +126,7 @@ WAIT_OK_LOOP:
 		case <-ctx.Done():
 			return nil
 		case <-tk.C:
-			err := this.DoTask(ctx)
+			err := this.doTask(ctx)
 			if err != nil && !gorm.IsRecordNotFoundError(errors.Cause(err)) {
 				log.Println("ERROR: 执行任务失败 ", err.Error())
 			}
@@ -139,7 +139,7 @@ WAIT_OK_LOOP:
 }
 
 // 执行任务逻辑
-func (this *DbCoordinater) DoTask(ctx context.Context) error {
+func (this *DbCoordinater) doTask(ctx context.Context) error {
 	co := &CmdOrder{}
 	err := this.Db.Model(co).Where("batch_id = ? and is_done = 0", this.BatchId).
 		Order("id asc").Limit(1).Find(co).Error

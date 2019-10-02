@@ -54,10 +54,8 @@ type Coordinater interface {
 	//	注册完成时，需要调用PushTask(ctx, nil, true)
 	//	如果done == true的话，只处理推送任务完成逻辑，忽略data
 	PushTask(context.Context, TaskInfo, bool) error
-	// 循环监听任务调度
+	// 循环监听任务调度,需要实现任务处理逻辑
 	Watch(context.Context) error
-	// 执行任务
-	DoTask(context.Context) error
 	// 阻塞检查是否完成
 	BlockCheckDone(context.Context) TaskRst
 }
