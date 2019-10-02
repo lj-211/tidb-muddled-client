@@ -381,9 +381,9 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	out := make(chan []uint)
 	go algorithm.FullListPermutationChan(numList, out)
 
-	// TODO
-	//	修改为insert ignore into
-	//	无论是哪个节点抢到锁，执行插入任务的顺序是稳定的(全排列算法输入输出稳定)
+	//	为了减小事务大小，这里分批生成任务时序
+	//		1. 修改为insert ignore into
+	//		2. 无论是哪个节点抢到锁，执行插入任务的顺序是稳定的(全排列算法输入输出稳定)
 	trans := func(db *gorm.DB) error {
 		var err error
 
