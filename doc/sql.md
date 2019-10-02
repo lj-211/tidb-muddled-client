@@ -20,6 +20,7 @@ CREATE TABLE `client_test`.`coordinate_info` (
   `task_cnt` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '任务数量',
   `done_task_cnt` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '已完成任务数量',
   `status` int(11) unsigned NOT NULL DEFAULT '0' COMMENT '状态',
+  `ttl` int(11) unsigned NOT NULL COMMENT '最近心跳时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_batch_id_node_id` (`batch_id`,`node_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci AUTO_INCREMENT=7208 COMMENT='批次节点信息表'
