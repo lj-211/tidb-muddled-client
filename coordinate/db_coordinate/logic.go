@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jinzhu/gorm"
@@ -353,7 +354,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	// TODO
 	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
 	//	可以根据业务情况优化
-	taskList, err := this.loadTask()
+	taskList, err := this.loadTask(ctx)
 	if err != nil {
 		return errors.Wrap(err, "加载任务失败")
 	}
@@ -368,7 +369,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 		numList = append(numList, nums)
 	}
 
-	out := make(chan []int)
+	out := make(chan []uint)
 	go algorithm.FullListPermutationChan(numList, out)
 
 	trans := func(db *gorm.DB) error {
@@ -382,7 +383,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 		// double check
 		ci := &CoordinateInfo{}
 		err = db.Model(ci).
-			Where("batch_id = ? and node_id = ?", this.BatchId, allIds[0]).Find(ci).Error
+			Where("batch_id = ? and node_id = ?", this.BatchId, this.Id).Find(ci).Error
 		if err != nil {
 			return errors.Wrap(err, "double check status fail")
 		}
@@ -416,6 +417,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 			return err
 		}
 
+		allIds := this.getAllIds()
 		err = this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).
 			Update(map[string]interface{}{
 				"status":   CiStatus_Completed,

@@ -84,7 +84,7 @@ func FullListPermutation(numList [][]int) [][]int {
 	return output
 }
 
-func backtrackingListChan(numList [][]int, mask []int, depth int, arr []int, output chan []int) {
+func backtrackingListChan(numList [][]uint, mask []int, depth int, arr []uint, output chan []uint) {
 	if output == nil {
 		return
 	}
@@ -94,7 +94,7 @@ func backtrackingListChan(numList [][]int, mask []int, depth int, arr []int, out
 	}
 
 	if depth == len(arr) {
-		newArr := make([]int, len(arr))
+		newArr := make([]uint, len(arr))
 		copy(newArr, arr)
 		output <- newArr
 		return
@@ -113,7 +113,7 @@ func backtrackingListChan(numList [][]int, mask []int, depth int, arr []int, out
 }
 
 // output由外部创建，但是遵循生产者关闭的原则，在函数内部关闭
-func FullListPermutationChan(numList [][]int, output chan []int) {
+func FullListPermutationChan(numList [][]uint, output chan []uint) {
 	if output == nil {
 		return
 	}
@@ -130,7 +130,7 @@ func FullListPermutationChan(numList [][]int, output chan []int) {
 	}
 
 	cursorList := make([]int, size)
-	arr := make([]int, allSize)
+	arr := make([]uint, allSize)
 
 	backtrackingListChan(numList, cursorList, 0, arr, output)
 
