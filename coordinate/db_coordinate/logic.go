@@ -161,13 +161,7 @@ func (this *DbCoordinater) doTask(ctx context.Context) error {
 	}
 
 	trans := func(db *gorm.DB) error {
-		// TODO 优化为本地读取
-		ci := &CmdInfo{}
-		err := db.Model(ci).Where("id = ?", co.CmdId).Find(ci).Error
-		if err != nil {
-			return errors.Wrap(err, "查询任务失败")
-		}
-
+		// 如果没有找到，那是逻辑错误，必须强制退出任务
 		ciSql, ok := CmdInfoMap[co.CmdId]
 		if ok {
 			return common.LogicErr
