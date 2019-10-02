@@ -207,12 +207,14 @@ func (this *DbCoordinater) checkDone() (coordinate.TaskRst, error) {
 	allTask := 0
 	doneTask := 0
 	allAlive := true
+	infos := make([]string, 0)
 	now := time.Now().Unix()
 	for i := 0; i < len(cis); i++ {
 		v := cis[i]
 		allTask += v.TaskCnt
 		doneTask += v.DoneTaskCnt
-		if (now - v.Ttl) > nodeExpireTime {
+		if v.TaskCnt > v.DoneTaskCnt && (now-v.Ttl) > nodeExpireTime {
+			infos = append(infos, fmt.Sprintf("%s is lost", v.NodeId))
 			allAlive = false
 		}
 	}
@@ -223,7 +225,7 @@ func (this *DbCoordinater) checkDone() (coordinate.TaskRst, error) {
 	case allTask < doneTask:
 		if !allAlive {
 			doneState = coordinate.DoneState_OverTime
-			msg = "任务节点已超时, 任务退出"
+			msg = strings.Join(infos, " | ")
 		} else {
 			doneState = coordinate.DoneState_Doing
 			msg = fmt.Sprintf("任务进度: %d / %d", doneTask, allTask)
@@ -512,7 +514,6 @@ OUT_LOOP:
 
 // 节点保活
 func (this *DbCoordinater) ttl(ctx context.Context) {
-	// TODO 更新ci信息中的ttl字段
 	updateTtl := func(t time.Time) {
 		err := this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id = ?",
 			this.BatchId, this.Id).Update("ttl", t.Unix()).Error
