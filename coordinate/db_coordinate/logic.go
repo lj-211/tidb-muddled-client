@@ -19,6 +19,7 @@ import (
 
 const ttlTimeDuration time.Duration = time.Second * 10
 const nodeExpireTime int64 = 60 // 单位秒
+const newCmdOrderTransCnt int = 100
 
 // 当前节点的任务sql索引
 // 这个数据在初始化时写，watch时读所以没有共享数据并发读写问题
@@ -169,7 +170,8 @@ func (this *DbCoordinater) doTask(ctx context.Context) error {
 
 		sql := ciSql
 		// TODO 这里可能存在数据不一致的问题，待优化
-		//	add donefile sync db
+		//	1. add donefile sync db
+		//	2. 从kafka消费tidb binlog 来验证任务是否完成
 		err = this.Proc(sql)
 		if err != nil {
 			return errors.Wrap(err, "执行任务失败")
@@ -379,7 +381,9 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 	out := make(chan []uint)
 	go algorithm.FullListPermutationChan(numList, out)
 
-	// TODO 大事务？
+	// TODO
+	//	修改为insert ignore into
+	//	无论是哪个节点抢到锁，执行插入任务的顺序是稳定的(全排列算法输入输出稳定)
 	trans := func(db *gorm.DB) error {
 		var err error
 
@@ -400,10 +404,27 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 			return nil
 		}
 
+		// 1. select count(1) where batch_id = ?
+		// 2. calc delta then start again
+
+		cnt := 0
+		err = this.Db.Model(&CmdOrder{}).Where("batch_id = ?", this.BatchId).Count(&cnt).Error
+		if err != nil {
+			return errors.New("查询已生成数量失败")
+		}
+
+		newCmdOrderSql := "insert ignore into (`batch_id`, `cmd_id`, `node_id`) values (%s, %d, %s);"
+
 		size := 0
+		newSize := 0
 		for v := range out {
-			size++
 			for i := 0; i < len(v); i++ {
+				size++
+				if size <= cnt {
+					continue
+				}
+
+				newSize++
 				e := v[i]
 				cmd, _ := idxMap[e]
 				co := &CmdOrder{
@@ -412,9 +433,13 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 					NodeId:  cmd.NodeId,
 				}
 
-				err = db.Model(co).Create(co).Error
+				err = db.Model(co).Exec(newCmdOrderSql, this.BatchId, cmd.ID, cmd.NodeId).Error
 				if err != nil {
 					break
+				}
+
+				if newSize == newCmdOrderTransCnt {
+					return nil
 				}
 			}
 		}
