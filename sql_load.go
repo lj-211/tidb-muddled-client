@@ -13,5 +13,5 @@ func PushSqlToCoordinate(sql string, isLast bool) error {
 		Id:      Id,
 		Sql:     sql,
 	}
-	return TaskCoordinater.PushTask(context.TODO(), ci, isLast)
+	return TaskCoordinater.PushTask(context.Background(), ci, isLast)
 }

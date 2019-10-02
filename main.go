@@ -72,7 +72,7 @@ func startWork() {
 		return
 	}
 
-	done := TaskCoordinater.BlockCheckDone(context.TODO())
+	done := TaskCoordinater.BlockCheckDone(context.Background())
 	log.Println("任务结束状态: ", coordinate.DoneStateToStr(done.DoneState),
 		" 结束信息: ", done.Msg)
 
