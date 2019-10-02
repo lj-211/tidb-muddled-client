@@ -351,9 +351,6 @@ OUT_LOOP:
 
 // 生成全排列任务序列
 func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
-	// TODO
-	//	这里的查询以及下面的查询可能存在过多数据查询和大事务的问题，
-	//	可以根据业务情况优化
 	taskList, err := this.loadTask(ctx)
 	if err != nil {
 		return errors.Wrap(err, "加载任务失败")

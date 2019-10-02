@@ -73,23 +73,23 @@ func Test_FullListPermutation(t *testing.T) {
 }
 
 func Test_FullListPermutationChan(t *testing.T) {
-	in := [][]int{
-		[]int{1, 2},
-		[]int{3},
+	in := [][]uint{
+		[]uint{1, 2},
+		[]uint{3},
 	}
-	cret := [][]int{
-		[]int{1, 2, 3},
-		[]int{1, 3, 2},
-		[]int{3, 1, 2},
+	cret := [][]uint{
+		[]uint{1, 2, 3},
+		[]uint{1, 3, 2},
+		[]uint{3, 1, 2},
 	}
-	outChan := make(chan []int)
+	outChan := make(chan []uint)
 	go FullListPermutationChan(in, outChan)
-	ret := make([][]int, 0)
+	ret := make([][]uint, 0)
 
 	for v := range outChan {
 		log.Println(v)
 		ret = append(ret, v)
 	}
 
-	assert.Equal(t, true, equal(ret, cret), "返回值检查必须深度相等")
+	assert.Equal(t, true, reflect.DeepEqual(ret, cret), "返回值检查必须深度相等")
 }
