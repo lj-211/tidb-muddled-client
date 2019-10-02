@@ -396,7 +396,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 			return errors.Wrap(err, "double check status fail")
 		}
 		if ci.Status != CiStatus_InitOk {
-			log.Println("状态异常，放弃生成序列数据")
+			log.Println("状态已修改，放弃生成序列数据")
 			return nil
 		}
 
