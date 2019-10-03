@@ -22,6 +22,8 @@ func DoneStateToStr(st int) string {
 		return "批次任务超时"
 	case st == DoneState_ErrOccur:
 		return "任务发生错误"
+	case st == DoneState_Doing:
+		return "任务进行中"
 	default:
 		return "非法的完成状态"
 	}
