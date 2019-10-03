@@ -118,21 +118,23 @@ func FullListPermutationChan(numList [][]uint, output chan []uint) {
 		return
 	}
 
-	size := len(numList)
-	if size == 0 {
-		return
+	for ok := true; ok; ok = false {
+		size := len(numList)
+		if size == 0 {
+			break
+		}
+
+		allSize := 0
+		for i := 0; i < size; i++ {
+			v := numList[i]
+			allSize += len(v)
+		}
+
+		cursorList := make([]int, size)
+		arr := make([]uint, allSize)
+
+		backtrackingListChan(numList, cursorList, 0, arr, output)
 	}
-
-	allSize := 0
-	for i := 0; i < size; i++ {
-		v := numList[i]
-		allSize += len(v)
-	}
-
-	cursorList := make([]int, size)
-	arr := make([]uint, allSize)
-
-	backtrackingListChan(numList, cursorList, 0, arr, output)
 
 	close(output)
 }
