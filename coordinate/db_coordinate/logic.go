@@ -176,7 +176,7 @@ func (this *DbCoordinater) doTask(ctx context.Context) error {
 	trans := func(db *gorm.DB) error {
 		// 如果没有找到，那是逻辑错误，必须强制退出任务
 		cmdExeInfo, ok := CmdInfoMap[co.CmdId]
-		if ok {
+		if !ok {
 			return common.LogicErr
 		}
 
@@ -242,7 +242,8 @@ func (this *DbCoordinater) checkDone() (coordinate.TaskRst, error) {
 		v := cis[i]
 		allTask += v.TaskCnt
 		doneTask += v.DoneTaskCnt
-		if v.TaskCnt > v.DoneTaskCnt && (now-v.Ttl) > nodeExpireTime {
+		if v.NodeId != this.Id && v.Ttl != 0 &&
+			v.TaskCnt > v.DoneTaskCnt && (now-v.Ttl) > nodeExpireTime {
 			infos = append(infos, fmt.Sprintf("%s is lost", v.NodeId))
 			allAlive = false
 		}
@@ -251,7 +252,7 @@ func (this *DbCoordinater) checkDone() (coordinate.TaskRst, error) {
 	switch {
 	case allTask == doneTask:
 		doneState = coordinate.DoneState_OK
-	case allTask < doneTask:
+	case allTask > doneTask:
 		if !allAlive {
 			doneState = coordinate.DoneState_OverTime
 			msg = strings.Join(infos, " | ")
@@ -311,11 +312,11 @@ func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
 				}
 			}
 			if allOk {
-				err = this.genTaskOrder(ctx)
+				cnt, err := this.genTaskOrder(ctx)
 				if err != nil {
 					log.Println("gen: ", err.Error())
 				} else {
-					log.Println("初始化任务次序成功")
+					log.Println("生成任务时序", cnt, "条")
 				}
 				break
 			}
@@ -361,7 +362,7 @@ OUT_LOOP:
 		for {
 			is := make([]*SimpleCmdInfo, 0)
 			err = this.Db.Model(&SimpleCmdInfo{}).Order("id asc").Limit(limit).
-				Where("id > ?", lastId).Find(&is).Error
+				Where("id > ? and node_id = ?", lastId, allIds[i]).Find(&is).Error
 			if err != nil {
 				break OUT_LOOP
 			}
@@ -371,6 +372,7 @@ OUT_LOOP:
 				lastId = is[size-1].ID
 			}
 			if size < limit {
+				infoList = append(infoList, infos)
 				break
 			}
 		}
@@ -384,10 +386,12 @@ OUT_LOOP:
 }
 
 // 生成全排列任务序列
-func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
+func (this *DbCoordinater) genTaskOrder(ctx context.Context) (int, error) {
+	genSize := 0
+
 	taskList, err := this.loadTask(ctx)
 	if err != nil {
-		return errors.Wrap(err, "加载任务失败")
+		return genSize, errors.Wrap(err, "加载任务失败")
 	}
 	numList := make([][]uint, 0)
 	idxMap := make(map[uint]*SimpleCmdInfo)
@@ -398,6 +402,9 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 			nums = append(nums, a.ID)
 		}
 		numList = append(numList, nums)
+	}
+	if len(numList) == 0 {
+		return genSize, errors.New("输入数据异常")
 	}
 
 	out := make(chan []uint)
@@ -413,6 +420,8 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 		if err != nil {
 			return errors.Wrap(err, "lock fail")
 		}
+
+		log.Printf("%s get the lock, gen task order", this.Id)
 
 		// double check
 		ci := &CoordinateInfo{}
@@ -435,18 +444,18 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 			return errors.New("查询已生成数量失败")
 		}
 
-		newCmdOrderSql := "insert ignore into (`batch_id`, `cmd_id`, `node_id`) values (%s, %d, %s);"
+		newCmdOrderSql := "insert ignore into cmd_order (`batch_id`, `cmd_id`, `node_id`) values (?, ?, ?);"
 
 		size := 0
-		newSize := 0
+		osize := 0
 		for v := range out {
+			osize++
 			for i := 0; i < len(v); i++ {
 				size++
 				if size <= cnt {
 					continue
 				}
-
-				newSize++
+				genSize++
 				e := v[i]
 				cmd, _ := idxMap[e]
 				co := &CmdOrder{
@@ -460,7 +469,7 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 					break
 				}
 
-				if newSize == newCmdOrderTransCnt {
+				if genSize == newCmdOrderTransCnt {
 					return nil
 				}
 			}
@@ -476,16 +485,16 @@ func (this *DbCoordinater) genTaskOrder(ctx context.Context) error {
 		err = this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id in (?)", this.BatchId, allIds).
 			Update(map[string]interface{}{
 				"status":   CiStatus_Completed,
-				"task_cnt": gorm.Expr("task_cnt * ?", size)}).Error
+				"task_cnt": gorm.Expr("task_cnt * ?", osize)}).Error
 
 		return err
 	}
 
 	if err := cdb.DoTrans(this.Db, trans); err != nil {
-		return errors.Wrap(err, "执行生成任务失败")
+		return genSize, errors.Wrap(err, "执行生成任务失败")
 	}
 
-	return nil
+	return genSize, nil
 }
 
 // db协调启动逻辑
@@ -585,7 +594,7 @@ OUT_LOOP:
 					exitClient(ds)
 					break OUT_LOOP
 				default:
-					log.Println("任务状态: ", coordinate.DoneStateToStr(ds.DoneState), ds.Msg)
+					//log.Println("任务状态: ", coordinate.DoneStateToStr(ds.DoneState), ds.Msg)
 				}
 			}
 		}
@@ -610,6 +619,7 @@ func (this *DbCoordinater) ttl(ctx context.Context) {
 	tk := time.NewTicker(ttlTimeDuration)
 	defer tk.Stop()
 
+	updateTtl(time.Now())
 OUT_LOOP:
 	for {
 		select {
