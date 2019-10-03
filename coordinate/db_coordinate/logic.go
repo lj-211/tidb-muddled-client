@@ -19,7 +19,7 @@ import (
 
 const ttlTimeDuration time.Duration = time.Second * 10
 const nodeExpireTime int64 = 60 // 单位秒
-const newCmdOrderTransCnt int = 100
+const newCmdOrderTransCnt int = 1000
 
 // 当前节点的任务sql索引
 // 这个数据在初始化时写，watch时读所以没有共享数据并发读写问题

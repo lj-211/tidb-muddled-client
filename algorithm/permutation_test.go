@@ -86,10 +86,12 @@ func Test_FullListPermutationChan(t *testing.T) {
 	go FullListPermutationChan(in, outChan)
 	ret := make([][]uint, 0)
 
+	size := 0
 	for v := range outChan {
-		log.Println(v)
+		size += len(v)
 		ret = append(ret, v)
 	}
+	log.Println(size)
 
 	assert.Equal(t, true, reflect.DeepEqual(ret, cret), "返回值检查必须深度相等")
 }
