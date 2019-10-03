@@ -121,6 +121,11 @@ func (this *DbCoordinater) PushTask(ctx context.Context, info coordinate.TaskInf
 
 // 监听协调器接收调度并且执行任务
 func (this *DbCoordinater) Watch(ctx context.Context) error {
+	defer func() {
+		if r := recover(); r != nil {
+			this.TaskOk <- errors.New("watch panic")
+		}
+	}()
 WAIT_OK_LOOP:
 	for {
 		select {
@@ -267,6 +272,12 @@ func (this *DbCoordinater) checkDone() (coordinate.TaskRst, error) {
 
 // 等待初始化完成
 func (this *DbCoordinater) WatchInitOk(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			this.TaskOk <- errors.New("watch init ok panic")
+		}
+	}()
+
 	tk := time.NewTicker(time.Second * 2)
 	defer tk.Stop()
 
@@ -534,13 +545,22 @@ func (this *DbCoordinater) getAllIds() []string {
 
 // 实现检查任务是否完成的监听
 func (this *DbCoordinater) watchDone(ctx context.Context) {
-	tk := time.NewTicker(time.Second)
-	defer tk.Stop()
 
 	exitClient := func(tr coordinate.TaskRst) {
 		this.Cancel()
 		this.Done <- tr
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			exitClient(coordinate.TaskRst{
+				DoneState: coordinate.DoneState_ErrOccur,
+				Msg:       "watch done协程崩溃",
+			})
+		}
+	}()
+	tk := time.NewTicker(time.Second)
+	defer tk.Stop()
 
 OUT_LOOP:
 	for {
@@ -574,6 +594,11 @@ OUT_LOOP:
 
 // 节点保活
 func (this *DbCoordinater) ttl(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			this.TaskOk <- errors.New("ttl panic")
+		}
+	}()
 	updateTtl := func(t time.Time) {
 		err := this.Db.Model(&CoordinateInfo{}).Where("batch_id = ? and node_id = ?",
 			this.BatchId, this.Id).Update("ttl", t.Unix()).Error
